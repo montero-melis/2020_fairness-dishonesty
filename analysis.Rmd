@@ -1,0 +1,722 @@
+---
+title: "Analysis script"
+author: '[Guillermo Montero-Melis](https://www.mpi.nl/people/montero-melis-guillermo)'
+output:
+  html_document:
+    depth: 2
+    number_sections: yes
+    theme: default
+    toc: yes
+---
+
+```{r global_options, include = FALSE}
+library("knitr")
+opts_chunk$set(fig.height = 3, fig.width = 4, echo = FALSE)
+```
+
+
+Introduction
+===========
+
+This document contains the analyses reported in the paper:
+
+Melis et al., (submitted) "The impact of justified and unjustified inequality on perceived
+fairness and dishonesty".
+
+The document was generated with [knitr](https://yihui.org/knitr/).
+The R source code needed to generate this report is found in the following 
+public OSF repository: [OSF LINK].
+
+
+Set up workspace
+===============
+
+Load libraries
+
+```{r load_packages, warning=FALSE, message=FALSE}
+library("tidyverse")
+library("sjPlot")
+library("lme4")    # for mixed models
+library("scales")  # percent on y-axis in ggplots
+```
+
+
+Import data
+
+```{r, message=FALSE}
+## Experiment 1
+# participant info
+e1_ppt <- read_csv("data/exp1_participant_info.csv")
+# dice rolls
+e1_rolls <- read.csv("data/exp1_dice_rolls.csv")
+## Experiment 2
+# participant info
+e2_ppt <- read_csv("data/exp2_participant_info.csv")
+# dice rolls
+e2_rolls <- read_csv("data/exp2_dice_rolls.csv")
+```
+
+Recode factor levels
+
+```{r}
+e2_ppt$procedure <- factor(recode(
+  e2_ppt$procedure, unfair = "unjustified", fair = "justified"
+  ))
+e2_ppt$valence <- factor(recode(
+  e2_ppt$valence, good = "not-disadvant", bad = "disadvant"
+  ))
+```
+
+
+Global variables (for figures and plots)
+
+```{r}
+# ggplot
+theme_set(theme_bw())
+# theme_set(theme_classic())
+pd <- position_dodge(0.4)
+err_bar_width <- .25
+err_bar_size  <- 1.25
+point_size    <- 2.5
+line_size     <- .75
+jitter_width  <- .35
+my_alpha      <- .25
+```
+
+
+Convenience functions (loaded from script)
+
+```{r}
+source("convenience_fncs.R")
+```
+
+
+```{r, warning=FALSE}
+# Create directory where figures will be stored
+dir.create("myfigures")
+```
+
+
+Experiment 1
+============
+
+Show first rows of the two data sets (see `README` for column key):
+
+```{r, message=FALSE}
+kable(head(e1_ppt))
+kable(head(e1_rolls))
+```
+
+
+General descriptives 
+--------------------
+
+**Age**: 
+M  = `r round(mean(e1_ppt$age), 1)`,
+SD = `r round(sd(e1_ppt$age), 1)`.
+
+
+```{r}
+e1_ppt %>%
+  group_by(gender) %>%
+  summarise(N = n()) %>%
+  kable()
+```
+
+
+Number of participants per condition:
+
+```{r}
+# Conditions are balanced:
+e1_ppt %>%
+  group_by(pay, justification) %>%
+  summarise(N = n()) %>%
+  kable()
+```
+
+
+Coding scheme
+-------------
+
+Set coding scheme (contrast coding with difference of 1):
+
+```{r}
+# Contrast coding with difference of 1
+e1_ppt <- set_contrast_coding(e1_ppt, "pay", "high_low")
+e1_ppt <- set_contrast_coding(e1_ppt, "justification", "just_unjust")
+```
+
+```{r}
+# Join e1_rolls with columns defining the conditions:
+e1_rolls <- e1_rolls %>%
+  left_join(e1_ppt %>% select(subject:pay, justification))
+kable(head(e1_rolls, 4))
+```
+
+
+Perceptions of fairness
+-----------------------
+
+Were fairness ratings affected by the manipulated variables: payment and
+justification?
+
+
+### Descriptives
+
+```{r}
+make_error_plot(e1_ppt, "pay", "fairness", "justification") +
+  ylab("perceived fairness") +
+  scale_y_continuous(breaks = seq(0, 10, 2))
+my_ggsave("exp1_fairness")
+```
+
+```{r}
+grouped_mean(e1_ppt, fairness, 2, pay)
+grouped_mean(e1_ppt, fairness, 2, justification)
+grouped_mean(e1_ppt, fairness, 2, pay, justification)
+```
+
+
+### Linear regression
+
+```{r}
+fairness_lm <- lm(fairness ~ pay * justification, data = e1_ppt)
+model_summaries(fairness_lm)
+```
+
+**Same model with standardized coefficients:**
+
+```{r}
+# The journal asks for effect sizes to be reported in the cover letter upon
+# For significant effects in linear regressions, we report coefficients on the
+# original scale (above) and also standardized coefficients:
+e1_ppt <- e1_ppt %>%
+  mutate(
+    fairness_z = as.vector(scale(fairness)),
+    pay_z = - scale(as.numeric(pay)),  # change sign to match our coding scheme
+    justification_z = - scale(as.numeric(justification))  # minus to match c.s.
+  )
+fairness_lm_z <- lm(fairness_z ~ pay_z * justification_z, data = e1_ppt)
+model_summaries(fairness_lm_z, print_summary = FALSE)
+```
+
+
+
+Reported rewarded dice rolls (RDRs)
+----------------------------------
+
+### Descriptives
+
+```{r}
+e1_RDR <- e1_rolls %>%
+  group_by(subject, pay, justification) %>%
+  summarise(RDRs = sum(RDR))
+make_error_plot(e1_RDR, "pay", "RDRs", "justification") +
+  xlab("pay rate") +
+  ylim(0, 5) +
+  geom_hline(yintercept = 2.5, linetype = "dotted")
+my_ggsave("exp1_RDRs")
+```
+
+```{r}
+grouped_mean(e1_RDR, RDRs, 2, pay)
+grouped_mean(e1_RDR, RDRs, 2, justification)
+grouped_mean(e1_RDR, RDRs, 2, pay, justification)
+```
+
+
+### Binomial regression
+
+```{r}
+RDR_binom <- glm(cbind(RDRs, 5 - RDRs) ~ pay * justification,
+                 family = "binomial",
+                 data = e1_RDR)
+model_summaries(RDR_binom)
+```
+
+
+### Comparison against chance
+
+Comparison against chance of the number of RDRs in the two payment conditions
+(high vs. low) :
+
+```{r}
+# low pay
+fm_RDR_lo <- e1_RDR %>%
+  filter(pay == "low") %>%
+  glm(cbind(RDRs, 5 - RDRs) ~ 1, family = "binomial", data = .)
+model_summaries(fm_RDR_lo)
+# high pay
+fm_RDR_hi <- e1_RDR %>%
+  filter(pay == "high") %>%
+  glm(cbind(RDRs, 5 - RDRs) ~ 1, family = "binomial", data = .)
+model_summaries(fm_RDR_hi)
+```
+
+
+### Mediation analysis
+
+**Rationale**
+
+Only payment type affected reported RDRs, but both manipulations affected
+perceived fairness. This motivates a mediation analysis to
+better understand the causality chain in our model (Baron and Kenny, 1986).
+It could be the case that our manipulations did not affect participants'
+cheating behaviour directly, but rather through the mediation of a third 
+variable, perceived fairness. To evaluate this possibility we proceeded in
+three steps (cf. Baron and Kenny, 1986):
+
+1. We established that the potential mediator variable (perceived fairness)
+is predicted by the experimental manipulations (justification and payment).
+This was our first analysis, which indeed revealed a significant effect of
+both variables on perceived fairness.
+2. We established that the critical outcome (RDR) is significantly 
+predicted by the experimental manipulations. This was our second analysis, which
+indicated that payment indeed was a reliable predictor of RDR.
+3. As the final step, we now regress RDR against the experimental manipulations 
+*and* perceived fairness, so that the effect of the manipulations is estimated
+while controlling for the effects of the potential mediator and viceversa.
+
+**Logic**
+
+If the effect of our manipulations on reported RDRs is completely mediated by
+perceived fairness, then payment type should not be a significant predictor of
+RDR in this new model anymore.
+
+```{r}
+# Add centred fairness ratings to the dice roll data:
+e1_RDR <- e1_RDR %>%
+  left_join(e1_ppt %>% select(subject, fairness)) %>%
+  ungroup() %>%
+  mutate(fairness_c = fairness - mean(fairness))
+# show first rows
+head(e1_RDR, 4) %>% kable()
+# Mediation analysis:
+RDR_binom_mediation <- glm(
+  cbind(RDRs, 5 - RDRs) ~ pay * justification + fairness_c,
+  family = "binomial",
+  data = e1_RDR
+  )
+```
+
+**Model summary**
+
+```{r}
+model_summaries(RDR_binom_mediation)
+```
+
+
+**Conclusion**
+
+Payment remains the only significant predictor of RDR.
+Its estimated coefficient is virtually unchanged with regard to its size
+and its significance, compared to the model that did not included perceived
+fairness as a predictor.
+At the same time, perceived fairness does not have a significant effect on
+RDR.
+Hence, we find no evidence that the effect of the manipulations on cheating
+behaviour (RDRs) is mediated by perceived fairness.
+
+
+**Additional (more complex) model**
+
+In a footnote we allude to an additional regression model in which RDR was
+regressed against justification, payment, perceived fairness 
+*and all possible interactions between them* 
+(see Baron & Kenny, 1986 for a motivation of such a model in situations where
+there is both mediation and moderation). The model summary is shown below.
+The results are qualitatively identical to the ones of the simpler model.
+
+```{r}
+RDR_binom_mediation_3way <- glm(
+  cbind(RDRs, 5 - RDRs) ~ pay * justification * fairness_c,
+  family = "binomial",
+  data = e1_RDR
+  )
+model_summaries(RDR_binom_mediation_3way, print_summary = FALSE)
+```
+
+
+**Visual check**
+
+Visually, there is indeed no indication of an effect of any variable apart from
+payment:
+
+```{r, fig.width = 8}
+ggplot(e1_RDR, aes(x = fairness, y = RDRs, colour = justification,
+           shape = justification)) +
+  geom_jitter(height = .1, width = .1, alpha = my_alpha) +
+  geom_smooth(method = "lm") +
+  facet_grid(. ~ pay) +
+  xlab("fairness rating") +
+  ylab("rewarded dice rolls") +
+  geom_hline(yintercept = 2.5, linetype = "dotted")
+```
+
+
+Reported cheating and temptation to cheat
+----------------------------------------
+
+Overall, 
+`r round(100 * mean(ifelse(e1_ppt$lied == "yes", 1, 0)), 1)`%
+of the participants reported cheating and
+`r round(100 * mean(ifelse(e1_ppt$tempted_lie == "yes", 1, 0)), 1)`%
+reported being tempted to lie.
+
+**Descriptive table**
+
+
+```{r}
+e1_ppt %>%
+  group_by(pay, justification) %>%
+  summarise(
+    N = n(),
+    `reported cheating` = sum(lied == "yes"),
+    `cheat %` = 100 * `reported cheating` / N,
+    `tempted to cheat` = sum(tempted_lie == "yes"),
+    `tempted %` = 100 * `tempted to cheat` / N
+    ) %>%
+  kable()
+```
+
+
+### Reported cheating
+
+Visually:
+
+```{r}
+plot_proportion(e1_ppt, "lied", "reported cheating")
+```
+
+
+Logistic regression:
+
+```{r}
+cheat_fm <- e1_ppt %>%
+  mutate(lied_num = ifelse(lied == "yes", 1, 0)) %>%
+  glm(lied_num ~ pay * justification, data = ., family = "binomial")
+model_summaries(cheat_fm)
+```
+
+
+### Temptation to cheat
+
+Visually:
+
+```{r}
+plot_proportion(e1_ppt, "tempted_lie", "tempted to cheat")
+my_ggsave("exp1_temptation")
+```
+
+
+Logistic regression:
+
+```{r}
+tempted_fm <- e1_ppt %>%
+  mutate(tempted_num = ifelse(tempted_lie == "yes", 1, 0)) %>%
+  glm(tempted_num ~ pay * justification, data = ., family = "binomial")
+model_summaries(tempted_fm)
+```
+
+
+
+Experiment 2
+============
+
+Show first rows of the two data sets (see `README` for column key):
+
+```{r, message=FALSE}
+kable(head(e2_ppt))
+kable(head(e2_rolls))
+```
+
+
+General descriptives and coding scheme
+-------------------------------------
+
+Total number of participants:
+`r length(unique(e2_ppt$subject))`.
+
+Number of participants per condition:
+
+```{r}
+e2_ppt %>%
+  group_by(outcome, procedure, quiz_official, pay_rate, valence) %>%
+  summarise(N = n()) %>%
+  kable()
+```
+
+One participant appears to have received the incorrect pay rate; remove them:
+
+```{r}
+e2_ppt[
+  with(e2_ppt, procedure == "justified" & outcome == "unequal" &
+         quiz_official == "winner" & pay_rate == 5)
+  ,] %>%
+  kable()
+e2_ppt <- e2_ppt %>% filter(subject != "77_a")
+e2_rolls <- e2_rolls %>% filter(subject != "77_a")
+```
+
+
+Set coding scheme:
+
+```{r}
+e2_ppt <- set_contrast_coding(e2_ppt, "outcome", "equal_unequal")
+e2_ppt <- set_contrast_coding(e2_ppt, "procedure", "justif_unjustif") 
+e2_ppt <- set_contrast_coding(e2_ppt, "valence", "not-disadv_disadv", -1) 
+```
+
+
+```{r}
+# Join e1_rolls with columns defining the conditions:
+e2_rolls <- e2_rolls %>%
+  left_join(e2_ppt %>% select(dyad:outcome, quiz_official:pay_rate, valence))
+kable(head(e2_rolls, 4))
+```
+
+
+Perception of fairness
+-----------------------
+
+Were fairness ratings affected by the manipulated variables?
+
+### Descriptives
+
+```{r}
+plot_proportion2(e2_ppt, "fair", "'fair' ratings")
+my_ggsave("exp2_fairness")
+```
+
+```{r}
+grouped_prop(e2_ppt, fair, 2, outcome)
+grouped_prop(e2_ppt, fair, 2, procedure)
+grouped_prop(e2_ppt, fair, 2, valence)
+```
+
+
+### Main analysis
+
+```{r}
+# Here and below: Exp2 is by design not fully crossed (valence does not vary in
+# the Justified-Equal condition; thus the 3-way ineraction can't be estimated.
+# Create function to define the maximal model (IVs) as a formula:
+make_exp2_formula <- function (DV) {
+  IVs <- "~ outcome * procedure + outcome * valence + procedure * valence"
+  as.formula(paste(DV, IVs))
+} 
+```
+
+
+```{r}
+e2_ppt$fair_num <- ifelse(e2_ppt$fair == "yes", 1, 0)
+# Logistic regression to predict reported fairness:
+exp2_fair_fm <- glm(
+  make_exp2_formula("fair_num"),
+  data = e2_ppt,
+  family = binomial(link='logit'))
+model_summaries(exp2_fair_fm)
+```
+
+
+### Follow-up analysis using Procedure and Outcome only
+
+A judgement of fairness should not in principle depend on the valence of
+the outcome. Ethically, fairness is an objective measure, not a matter of
+how a situation affects *you* in particular. So first, we re-run the 
+analysis without valence as a predictor.
+
+Visually:
+
+```{r}
+plot_proportion2(e2_ppt, "fair", "'fair' ratings", just2 = TRUE)
+```
+
+Analysis:
+
+```{r}
+# Logistic regression to predict reported fairness from the manipulations
+# of the 2x2 design manipulated between triads (this excludes valence)
+exp2_fair_fm_2x2 <- glm(
+  fair_num ~ procedure * outcome,
+  data = e2_ppt,
+  family = binomial(link='logit')
+  )
+model_summaries(exp2_fair_fm_2x2, print_summary = FALSE)
+```
+
+
+Dishonesty measure: Average Reported Score (ARS)
+------------------
+
+### Descriptives
+
+```{r}
+# Average reported number of pips (ARS)
+e2_ars <- e2_rolls %>%
+  group_by(dyad, subject, outcome, procedure, valence) %>%
+  summarise(ARS = mean(pips, na.rm = TRUE)) %>%
+  mutate(ARS_bias = ARS - 3.5)
+kable(head(e2_ars, 3), digits = 2)
+```
+
+
+```{r, fig.width=5, fig.height=4}
+expect_hline <- geom_hline(yintercept = 3.5, colour = "darkblue",
+                           linetype = "dashed")
+# plot
+ggplot(e2_ars, aes(x = valence, y = ARS)) +
+  geom_jitter(height = 0, width = jitter_width, alpha = .2, colour = "blue") +
+  stat_summary(
+    fun.data = mean_se, geom = "errorbar", fun.args = list(mult = 1.96),
+    width = err_bar_width, size = err_bar_size
+    ) +
+  facet_grid(procedure ~ outcome) +
+  expect_hline  +
+  ylim(1, 6) +
+  ylab("Average reported score") +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+    )
+my_ggsave("exp2_ARS")
+```
+
+```{r}
+grouped_mean(e2_ars, ARS, 2, outcome, procedure, valence)
+```
+
+
+### Analysis
+
+For the analysis we use *ARS_bias* ($ARS - 3.5$) instead of ARS:
+
+```{r}
+exp2_ars_fm <- lm(
+  ARS_bias ~ procedure * outcome + procedure * valence + outcome * valence,
+  data = e2_ars
+  )
+model_summaries(exp2_ars_fm)
+```
+
+
+### Each condition against chance (t-tests)
+
+```{r}
+# function to extract information from a t-test
+get_t_info <- function(v, info = NULL) {
+  t_test <- t.test(v, mu = 0)
+  t_test[[info]]
+}
+# save all info into a dataframe
+e2_t_tests <- e2_ars %>%
+  group_by(outcome, procedure, valence) %>%
+  summarise(
+    M  = mean(ARS_bias, na.rm = TRUE),
+    SD = sd(ARS_bias, na.rm = TRUE),
+    df = get_t_info(ARS_bias, "parameter"),
+    t  = get_t_info(ARS_bias, "statistic"),
+    p_unadj = get_t_info(ARS_bias, "p.value")
+    )
+# adjusted p-values (Holm's method)
+e2_t_tests$p_adjusted <- p.adjust(e2_t_tests$p_unadj, method = "holm")
+kable(e2_t_tests, digits = c(rep(2, 7), 4, 4))
+```
+
+
+Reported cheating and temptation to cheat
+----------------------------------------
+
+Of all participants,
+`r round(100 * mean(ifelse(e2_ppt$cheated == "yes", 1, 0), na.rm = TRUE))`%
+reported having cheated.
+
+**Descriptive table**
+
+```{r}
+e2_ppt %>%
+  group_by(outcome, procedure, valence) %>%
+  summarise(
+    N = n(),
+    `reported cheating (%)` = 100 * sum(cheated == "yes", na.rm = TRUE) / N,
+    `temptation to cheat (1-5)` = mean(tempted_cheat, na.rm = TRUE),
+    `(SD)` = sd(tempted_cheat, na.rm = TRUE)
+    ) %>%
+  kable(digits = 1)
+```
+
+
+### Reported cheating
+
+
+#### Default coding for valence
+
+Visually:
+
+```{r}
+plot_proportion2(e2_ppt, "cheated", "reported cheating")
+```
+
+```{r}
+grouped_prop(e2_ppt, cheated, 2, procedure)
+```
+
+
+Logistic regression:
+
+```{r}
+e2_ppt$cheated_num <- ifelse(e2_ppt$cheated == "yes", 1, 0)
+exp2_cheat_fm <- glm(
+  make_exp2_formula("cheated_num"),
+  data = e2_ppt, 
+  family = "binomial")
+model_summaries(exp2_cheat_fm)
+```
+
+
+### Temptation to cheat
+
+Temptation to cheat was indicated as a rating on a scale from 0 (not at all) to
+5 (very much).
+The mean rating was
+`r round(mean(e2_ppt$tempted_cheat, na.rm = TRUE), 1)`.
+
+Visually:
+
+```{r, warning = FALSE}
+ggplot(e2_ppt, aes(x = valence, y = tempted_cheat)) +
+  stat_summary(
+    fun.data = mean_cl_boot, geom = "errorbar", width = err_bar_width,
+    size = err_bar_size, position = pd
+    ) +
+  stat_summary(
+    fun.y = "mean", geom = "point", size = point_size, position = pd
+    ) +
+  geom_jitter(height = 0, width = jitter_width, alpha = .1, colour = "blue") +
+  facet_grid(procedure ~ outcome) +
+  ylab("tempation to cheat")
+```
+
+
+
+Linear regression:
+
+```{r}
+exp2_tempted_fm <- lm(
+  tempted_cheat ~ procedure * outcome + procedure * valence + outcome * valence,
+  data = e2_ppt
+  )
+model_summaries(exp2_tempted_fm)
+```
+
+
+
+
+Session info
+============
+
+```{r}
+sessionInfo()
+```
+
