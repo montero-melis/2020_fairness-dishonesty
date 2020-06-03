@@ -25,7 +25,7 @@ fairness and dishonesty".
 
 The document was generated with [knitr](https://yihui.org/knitr/).
 The R source code needed to generate this report is found in the following 
-public OSF repository: [OSF LINK].
+public OSF repository: https://osf.io/xt3hs/.
 
 
 Set up workspace
